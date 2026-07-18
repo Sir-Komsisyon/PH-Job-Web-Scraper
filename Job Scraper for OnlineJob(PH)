@@ -1,0 +1,63 @@
+from bs4 import BeautifulSoup
+import requests
+import csv
+import time
+
+user_input = input("What job do you want to search for? (e.g., data analyst): ")
+formatted_query = user_input.replace(" ", "+")
+
+# FIX 1: Updated the URL parameter from 'q=' to 'jobkeyword='
+url = f"https://www.onlinejobs.ph/jobseekers/jobsearch?jobkeyword={formatted_query}"
+
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+print(f"Fetching data from: {url}")
+response = requests.get(url, headers=headers)
+
+if response.status_code == 200:
+    soup = BeautifulSoup(response.text, "html.parser")
+    jobs = soup.find_all("div", class_="jobpost-cat-box")
+
+    print(f"\nDEBUG: Found {len(jobs)} job cards on the page.\n")
+
+    filename = f"{formatted_query}_jobs.csv"
+
+    with open(filename, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Job Title", "Salary", "Link"])
+
+        for job in jobs:
+            # FIX 2: Find the 'a' (link) tag inside the title to drop the "Full Time" text
+            title_tag = job.find(class_="fs-16")
+            if title_tag:
+                a_tag = title_tag.find("a")
+                # If it finds the link tag, use that text. Otherwise, fall back to the whole text.
+                title = a_tag.text.strip() if a_tag else title_tag.text.strip()
+            else:
+                title = "Title Not Found"
+
+            # FIX 3: Scan all text in the job card for money symbols instead of using HTML classes
+            salary = "Salary Not Found"
+            for text_snippet in job.stripped_strings:
+                if "$" in text_snippet or "Php" in text_snippet or "PHP" in text_snippet:
+                    salary = text_snippet
+                    break
+
+            # Link Extraction
+            link_tag = job.find("a")
+            link = link_tag["href"] if link_tag else "Link Not Found"
+            if link.startswith("/"):
+                link = f"https://www.onlinejobs.ph{link}"
+
+            # Print to terminal so you can see it working in real-time
+            print(f"Scraped: {title} | {salary}")
+
+            writer.writerow([title, salary, link])
+
+    print(f"\nSuccessfully saved jobs to {filename}!")
+    time.sleep(5)
+
+else:
+    print(f"Failed to retrieve the page. Status code: {response.status_code}")
