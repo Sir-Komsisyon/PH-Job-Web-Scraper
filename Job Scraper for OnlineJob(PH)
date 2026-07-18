@@ -6,7 +6,6 @@ import time
 user_input = input("What job do you want to search for? (e.g., data analyst): ")
 formatted_query = user_input.replace(" ", "+")
 
-# NEW: Ask the user how many pages to scrape
 try:
     num_pages = int(input("How many pages do you want to scrape? (1 page = ~30 jobs): "))
 except ValueError:
@@ -19,32 +18,28 @@ headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-# NEW: Open the file ONCE, before the loop starts, so we don't overwrite it
 with open(filename, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
-    writer.writerow(["Job Title", "Salary", "Link"])
+    writer.writerow(["Job Title", "Job Type", "Salary", "Date Posted", "Link"])
 
-    # NEW: Loop through the page numbers (from 1 to whatever number you typed)
     for page in range(1, num_pages + 1):
         print(f"\n--- Scraping Page {page} ---")
 
-        # NEW: The URL now includes the '&p=' parameter to tell the site which page we want
         url = f"https://www.onlinejobs.ph/jobseekers/jobsearch?jobkeyword={formatted_query}&p={page}"
-
         response = requests.get(url, headers=headers)
 
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "html.parser")
             jobs = soup.find_all("div", class_="jobpost-cat-box")
 
-            # If a page has 0 jobs, it means we reached the end of the search results
             if len(jobs) == 0:
                 print("No more jobs found! Reached the end of the results.")
-                break  # This breaks us out of the loop early
+                break
 
             print(f"Found {len(jobs)} jobs on this page. Extracting...")
 
             for job in jobs:
+
                 # 1. Safely extract Title
                 title_tag = job.find(class_="fs-16")
                 if title_tag:
@@ -53,27 +48,40 @@ with open(filename, "w", newline="", encoding="utf-8") as f:
                 else:
                     title = "Title Not Found"
 
-                # 2. Safely extract Salary
+                # 2. FIX: Safely extract Job Type using the 'badge' class you found
+                # We use just "badge" because it is the most stable class name
+                # (it will catch "part-time", "full-time", or "freelance" badges)
+                type_tag = job.find("span", class_="badge")
+                job_type = type_tag.text.strip() if type_tag else "Type Not Found"
+
+                # 3. Safely extract Salary
                 salary = "Salary Not Found"
                 for text_snippet in job.stripped_strings:
                     if "$" in text_snippet or "Php" in text_snippet or "PHP" in text_snippet:
                         salary = text_snippet
                         break
 
-                # 3. Safely extract Link
+                # 4. Safely extract Date Posted
+                date_posted = "Date Not Found"
+                for text_snippet in job.stripped_strings:
+                    if "Posted on" in text_snippet:
+                        date_posted = text_snippet.replace("Posted on", "").strip()
+                        break
+
+                # 5. Safely extract Link
                 link_tag = job.find("a")
                 link = link_tag["href"] if link_tag else "Link Not Found"
                 if link.startswith("/"):
                     link = f"https://www.onlinejobs.ph{link}"
 
-                writer.writerow([title, salary, link])
+                # Write all 5 columns to the CSV
+                writer.writerow([title, job_type, salary, date_posted, link])
 
-            # CRITICAL: We MUST sleep between pages to avoid getting our IP address banned
             print(f"Finished Page {page}. Sleeping for 5 seconds to respect server limits...")
             time.sleep(5)
 
         else:
             print(f"Failed to retrieve page {page}. Status code: {response.status_code}")
-            break  # Stop the loop if the server blocks us
+            break
 
 print(f"\nAll done! Successfully saved jobs to {filename}!")
