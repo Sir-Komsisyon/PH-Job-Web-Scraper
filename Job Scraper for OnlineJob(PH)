@@ -6,58 +6,74 @@ import time
 user_input = input("What job do you want to search for? (e.g., data analyst): ")
 formatted_query = user_input.replace(" ", "+")
 
-# FIX 1: Updated the URL parameter from 'q=' to 'jobkeyword='
-url = f"https://www.onlinejobs.ph/jobseekers/jobsearch?jobkeyword={formatted_query}"
+# NEW: Ask the user how many pages to scrape
+try:
+    num_pages = int(input("How many pages do you want to scrape? (1 page = ~30 jobs): "))
+except ValueError:
+    print("Please enter a valid number. Defaulting to 1 page.")
+    num_pages = 1
+
+filename = f"{formatted_query}_jobs.csv"
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-print(f"Fetching data from: {url}")
-response = requests.get(url, headers=headers)
+# NEW: Open the file ONCE, before the loop starts, so we don't overwrite it
+with open(filename, "w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(["Job Title", "Salary", "Link"])
 
-if response.status_code == 200:
-    soup = BeautifulSoup(response.text, "html.parser")
-    jobs = soup.find_all("div", class_="jobpost-cat-box")
+    # NEW: Loop through the page numbers (from 1 to whatever number you typed)
+    for page in range(1, num_pages + 1):
+        print(f"\n--- Scraping Page {page} ---")
 
-    print(f"\nDEBUG: Found {len(jobs)} job cards on the page.\n")
+        # NEW: The URL now includes the '&p=' parameter to tell the site which page we want
+        url = f"https://www.onlinejobs.ph/jobseekers/jobsearch?jobkeyword={formatted_query}&p={page}"
 
-    filename = f"{formatted_query}_jobs.csv"
+        response = requests.get(url, headers=headers)
 
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Job Title", "Salary", "Link"])
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "html.parser")
+            jobs = soup.find_all("div", class_="jobpost-cat-box")
 
-        for job in jobs:
-            # FIX 2: Find the 'a' (link) tag inside the title to drop the "Full Time" text
-            title_tag = job.find(class_="fs-16")
-            if title_tag:
-                a_tag = title_tag.find("a")
-                # If it finds the link tag, use that text. Otherwise, fall back to the whole text.
-                title = a_tag.text.strip() if a_tag else title_tag.text.strip()
-            else:
-                title = "Title Not Found"
+            # If a page has 0 jobs, it means we reached the end of the search results
+            if len(jobs) == 0:
+                print("No more jobs found! Reached the end of the results.")
+                break  # This breaks us out of the loop early
 
-            # FIX 3: Scan all text in the job card for money symbols instead of using HTML classes
-            salary = "Salary Not Found"
-            for text_snippet in job.stripped_strings:
-                if "$" in text_snippet or "Php" in text_snippet or "PHP" in text_snippet:
-                    salary = text_snippet
-                    break
+            print(f"Found {len(jobs)} jobs on this page. Extracting...")
 
-            # Link Extraction
-            link_tag = job.find("a")
-            link = link_tag["href"] if link_tag else "Link Not Found"
-            if link.startswith("/"):
-                link = f"https://www.onlinejobs.ph{link}"
+            for job in jobs:
+                # 1. Safely extract Title
+                title_tag = job.find(class_="fs-16")
+                if title_tag:
+                    a_tag = title_tag.find("a")
+                    title = a_tag.text.strip() if a_tag else title_tag.text.strip()
+                else:
+                    title = "Title Not Found"
 
-            # Print to terminal so you can see it working in real-time
-            print(f"Scraped: {title} | {salary}")
+                # 2. Safely extract Salary
+                salary = "Salary Not Found"
+                for text_snippet in job.stripped_strings:
+                    if "$" in text_snippet or "Php" in text_snippet or "PHP" in text_snippet:
+                        salary = text_snippet
+                        break
 
-            writer.writerow([title, salary, link])
+                # 3. Safely extract Link
+                link_tag = job.find("a")
+                link = link_tag["href"] if link_tag else "Link Not Found"
+                if link.startswith("/"):
+                    link = f"https://www.onlinejobs.ph{link}"
 
-    print(f"\nSuccessfully saved jobs to {filename}!")
-    time.sleep(5)
+                writer.writerow([title, salary, link])
 
-else:
-    print(f"Failed to retrieve the page. Status code: {response.status_code}")
+            # CRITICAL: We MUST sleep between pages to avoid getting our IP address banned
+            print(f"Finished Page {page}. Sleeping for 5 seconds to respect server limits...")
+            time.sleep(5)
+
+        else:
+            print(f"Failed to retrieve page {page}. Status code: {response.status_code}")
+            break  # Stop the loop if the server blocks us
+
+print(f"\nAll done! Successfully saved jobs to {filename}!")
